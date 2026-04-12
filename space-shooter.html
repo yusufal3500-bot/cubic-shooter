@@ -57,7 +57,7 @@
     // Jika belum login, paksa balik ke halaman login
     if (!currentUser) {
         alert("Akses ditolak! Silahkan login terlebih dahulu.");
-        window.location.href = "logincubicshooter.html"; // Pastikan nama file login sesuai
+        window.location.href = "index.html"; // Pastikan nama file login sesuai
     }
 
     // Ambil progres khusus akun yang login
@@ -117,7 +117,7 @@
     document.getElementById("backLoginBtn").onclick = () => {
         if(confirm("Apakah Anda ingin kembali ke halaman Login? Progres yang belum tersimpan akan hilang.")) {
             sessionStorage.removeItem("activeUser"); // Logout sesi
-            window.location.href = "logincubicshooter.html"; // Nama file login kamu
+            window.location.href = "index.html"; // Nama file login kamu
         }
     };
 
