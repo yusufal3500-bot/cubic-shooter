@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cubic Shooter - Muxhin</title>
+    <style>
+        body { 
+            background: #000; display: flex; flex-direction: column; 
+            justify-content: center; align-items: center; min-height: 100vh; 
+            margin: 0; color: white; font-family: 'Arial', sans-serif; overflow: hidden;
+        }
+        canvas { border: 2px solid #333; background: #000; max-width: 95vw; max-height: 65vh; }
+        
+        #controls {
+            display: flex; justify-content: center; align-items: center;
+            gap: 10px; width: 100%; max-width: 450px; margin-top: 15px; flex-wrap: wrap;
+        }
+        button {
+            width: 60px; height: 60px; font-size: 11px; font-weight: bold;
+            background: #333; color: white; border: 2px solid #555;
+            border-radius: 50%; touch-action: manipulation; cursor: pointer;
+        }
+        #startBtn { background: #2ecc71 !important; width: 120px; border-radius: 10px; height: 50px; font-size: 16px; }
+        #backLoginBtn { background: #e67e22 !important; width: 160px; border-radius: 10px; height: 50px; font-size: 11px; }
+        #shootBtn { background: #ff4d4d !important; width: 80px; height: 80px; font-size: 16px; }
+        #pauseBtn, #checkpointBtn { background: #444; border-radius: 10px; width: 70px; }
+        #restartBtn { background: #555; border-radius: 10px; width: 65px; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="450" height="600"></canvas>
+
+<div id="controls">
+    <button id="startBtn">START</button>
+    <button id="backLoginBtn">BACK TO LOGIN TAB</button>
+    
+    <div style="width: 100%; height: 5px;"></div> 
+
+    <button id="pauseBtn">PAUSE</button>
+    <button id="leftBtn">◀</button>
+    <button id="shootBtn">FIRE</button>
+    <button id="rightBtn">▶</button>
+    <button id="restartBtn">RESET</button>
+    <button id="checkpointBtn" style="background: #2ecc71;">CHECK</button>
+</div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // --- INTEGRASI DATABASE & LOGIN ---
+    let currentUser = sessionStorage.getItem("activeUser");
+    let db = JSON.parse(localStorage.getItem("cubicShooterDB")) || {};
+
+    // Jika belum login, paksa balik ke halaman login
+    if (!currentUser) {
+        alert("Akses ditolak! Silahkan login terlebih dahulu.");
+        window.location.href = "logincubicshooter.html"; // Pastikan nama file login sesuai
+    }
+
+    // Ambil progres khusus akun yang login
+    let maxLevelReached = db[currentUser] ? db[currentUser].progress : 1;
+
+    // --- DATA GAME ---
+    let isMainMenu = true;
+    let stars = [];
+    let player = { x: 205, y: 520, width: 40, height: 40, speed: 10 };
+    let bullets = [];
+    let enemies = [];
+    let keys = {};
+    let score = 0;
+    let level = 1;
+    let isPaused = false;
+    let isGameOver = false;
+    let isCountdown = false;
+    let countdownTimer = 3;
+
+    // Inisialisasi Bintang
+    for (let i = 0; i < 80; i++) {
+        stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            size: Math.random() * 1.5,
+            opacity: Math.random(),
+            fade: Math.random() * 0.02 + 0.01
+        });
+    }
+
+    // --- INPUT HANDLERS ---
+    window.addEventListener("keydown", (e) => {
+        keys[e.key] = true;
+        if (e.key === " " && !isMainMenu) spawnBullet();
+    });
+    window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+
+    const setupBtn = (id, key) => {
+        const el = document.getElementById(id);
+        el.addEventListener("touchstart", (e) => { e.preventDefault(); keys[key] = true; });
+        el.addEventListener("touchend", () => { keys[key] = false; });
+        el.addEventListener("mousedown", () => { keys[key] = true; });
+        el.addEventListener("mouseup", () => { keys[key] = false; });
+    };
+    setupBtn("leftBtn", "ArrowLeft");
+    setupBtn("rightBtn", "ArrowRight");
+
+    // --- TOMBOL LOGIC ---
+    document.getElementById("startBtn").onclick = () => {
+        isMainMenu = false;
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("backLoginBtn").style.display = "none";
+        startCountdown();
+    };
+
+    // PERINTAH PINDAH HALAMAN BACK TO LOGIN
+    document.getElementById("backLoginBtn").onclick = () => {
+        if(confirm("Apakah Anda ingin kembali ke halaman Login? Progres yang belum tersimpan akan hilang.")) {
+            sessionStorage.removeItem("activeUser"); // Logout sesi
+            window.location.href = "logincubicshooter.html"; // Nama file login kamu
+        }
+    };
+
+    document.getElementById("shootBtn").onclick = spawnBullet;
+    document.getElementById("pauseBtn").onclick = () => {
+        if(!isMainMenu && !isGameOver) {
+            isPaused = !isPaused;
+            document.getElementById("pauseBtn").innerText = isPaused ? "RESUME" : "PAUSE";
+        }
+    };
+
+    document.getElementById("restartBtn").onclick = () => location.reload();
+
+    document.getElementById("checkpointBtn").onclick = () => {
+        let choice = prompt(`Pilot: ${currentUser}\nLevel Tertinggi: ${maxLevelReached}\nPilih level (1-${maxLevelReached}):`, maxLevelReached);
+        if (choice >= 1 && choice <= maxLevelReached) {
+            level = parseInt(choice);
+            score = (level - 1) * 250;
+            isMainMenu = false;
+            document.getElementById("startBtn").style.display = "none";
+            document.getElementById("backLoginBtn").style.display = "none";
+            enemies = []; bullets = []; isGameOver = false;
+            startCountdown();
+        } else if (choice !== null) {
+            alert("Level belum terbuka atau tidak valid!");
+        }
+    };
+
+    // --- FUNCTIONS ---
+    function spawnBullet() {
+        if (!isGameOver && !isPaused && !isCountdown && !isMainMenu) {
+            bullets.push({ x: player.x + player.width / 2 - 2, y: player.y, width: 4, height: 15 });
+        }
+    }
+
+    function startCountdown() {
+        isCountdown = true;
+        countdownTimer = 3;
+        let timer = setInterval(() => {
+            countdownTimer--;
+            if (countdownTimer <= 0) {
+                clearInterval(timer);
+                isCountdown = false;
+            }
+        }, 1000);
+    }
+
+    function saveToDatabase() {
+        if (db[currentUser]) {
+            db[currentUser].progress = maxLevelReached;
+            localStorage.setItem("cubicShooterDB", JSON.stringify(db));
+        }
+    }
+
+    function checkLevelUp() {
+        if (score >= level * 250 && level < 10) {
+            level++;
+            if (level > maxLevelReached) {
+                maxLevelReached = level;
+                saveToDatabase(); // Simpan ke akun otomatis
+            }
+            alert("YOU WIN! Siap untuk Level " + level + "?");
+            enemies = []; bullets = [];
+            startCountdown();
+        } else if (score >= 2500) {
+            isGameOver = true;
+            alert("TAMAT! " + currentUser + " telah menyelamatkan galaksi!");
+        }
+    }
+
+    // --- DRAW LOOP ---
+    function draw() {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        stars.forEach(s => {
+            ctx.fillStyle = `rgba(255,255,255,${s.opacity})`;
+            ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
+            s.opacity += s.fade;
+            if (s.opacity > 1 || s.opacity < 0) s.fade *= -1;
+        });
+
+        if (isMainMenu) {
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#00f3ff";
+            ctx.font = "bold 45px Arial";
+            ctx.fillText("CUBIC SHOOTER", canvas.width/2, 200);
+            ctx.fillStyle = "white";
+            ctx.font = "16px Arial";
+            ctx.fillText("Pilot: " + currentUser, canvas.width/2, 240);
+            ctx.fillStyle = "#888";
+            ctx.font = "12px Arial";
+            ctx.fillText("By Muxhin", canvas.width/2, 265);
+            ctx.textAlign = "left";
+        } else {
+            if (!isPaused && !isGameOver && !isCountdown) {
+                if (keys["ArrowLeft"] && player.x > 0) player.x -= player.speed;
+                if (keys["ArrowRight"] && player.x < canvas.width - player.width) player.x += player.speed;
+
+                bullets.forEach((b, i) => {
+                    b.y -= 10;
+                    ctx.fillStyle = "yellow"; ctx.fillRect(b.x, b.y, b.width, b.height);
+                    if (b.y < 0) bullets.splice(i, 1);
+                });
+
+                if (Math.random() < 0.01 + (level * 0.005)) {
+                    enemies.push({ x: Math.random()*(canvas.width-30), y: -30, speed: 2+(level*0.5) });
+                }
+
+                enemies.forEach((en, ei) => {
+                    en.y += en.speed;
+                    ctx.fillStyle = "#ff4d4d"; ctx.fillRect(en.x, en.y, 30, 30);
+                    if (en.y > canvas.height) isGameOver = true;
+                    bullets.forEach((b, bi) => {
+                        if (b.x < en.x + 30 && b.x + 4 > en.x && b.y < en.y + 30 && b.y + 15 > en.y) {
+                            enemies.splice(ei, 1); bullets.splice(bi, 1);
+                            score += 10; checkLevelUp();
+                        }
+                    });
+                });
+            }
+
+            ctx.fillStyle = "#00f3ff";
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            ctx.fillStyle = "white";
+            ctx.font = "bold 20px Arial";
+            ctx.fillText("Score: " + score, 20, 40);
+            ctx.font = "14px Arial";
+            ctx.fillText("Level: " + level + " | Pilot: " + currentUser, 20, 65);
+
+            if (isCountdown) {
+                ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+                ctx.fillStyle = "yellow"; ctx.font = "bold 80px Arial"; ctx.textAlign = "center";
+                ctx.fillText(countdownTimer, canvas.width/2, canvas.height/2); ctx.textAlign = "left";
+            }
+
+            if (isGameOver) {
+                ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+                ctx.fillStyle = "red"; ctx.font = "bold 40px Arial"; ctx.textAlign = "center";
+                ctx.fillText("GAME OVER", canvas.width/2, canvas.height/2);
+                ctx.textAlign = "left";
+            }
+        }
+        requestAnimationFrame(draw);
+    }
+    draw();
+</script>
+</body>
+</html>
