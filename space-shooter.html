@@ -3,82 +3,237 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cubic Shooter Mobile - Auto Fire Edition</title>
+    <title>Cubic Shooter - Muxhin (Auto-Fire Update)</title>
     <style>
-        /* CSS singkat untuk layout game */
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #0a0a0a;
-            font-family: 'Arial', sans-serif;
-            touch-action: none; /* Mencegah zoom/scroll saat main di mobile */
+        body { 
+            background: #000; display: flex; flex-direction: column; 
+            justify-content: center; align-items: center; min-height: 100vh; 
+            margin: 0; color: white; font-family: 'Arial', sans-serif; overflow: hidden;
+            touch-action: none; /* Mencegah scroll/zoom tidak sengaja di mobile */
         }
-
-        #game-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
+        canvas { border: 2px solid #333; background: #000; max-width: 95vw; max-height: 65vh; }
+        
+        #controls {
+            display: flex; justify-content: center; align-items: center;
+            gap: 15px; width: 100%; max-width: 450px; margin-top: 15px; flex-wrap: wrap;
         }
-
-        /* HUD (Heads Up Display) */
-        #hud {
-            position: absolute;
-            top: 20px;
-            left: 0;
-            right: 0;
-            display: flex;
-            justify-content: space-around;
-            color: #fff;
-            font-size: 1.2rem;
-            z-index: 10;
-            pointer-events: none;
+        button {
+            width: 70px; height: 60px; font-size: 14px; font-weight: bold;
+            background: #333; color: white; border: 2px solid #555;
+            border-radius: 12px; touch-action: manipulation; cursor: pointer;
         }
-
-        /* Layar Countdown / Game Over */
-        .overlay {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.7);
-            display: flex; flex-direction: column;
-            justify-content: center; align-items: center;
-            color: #fff;
-            z-index: 100;
-        }
-
-        #countdown { font-size: 5rem; font-weight: bold; color: #00f3ff; }
-
-        .hidden { display: none !important; }
+        #startBtn { background: #2ecc71 !important; width: 140px; height: 50px; font-size: 18px; }
+        #backLoginBtn { background: #e67e22 !important; width: 180px; height: 50px; font-size: 12px; }
+        #leftBtn, #rightBtn { width: 85px; height: 85px; font-size: 24px; border-radius: 50%; background: #444; }
+        #pauseBtn, #checkpointBtn, #restartBtn { background: #222; font-size: 11px; }
     </style>
 </head>
 <body>
 
-    <div id="game-container">
-        <div id="hud">
-            <div>SCORE: <span id="score">0</span></div>
-            <div>HEALTH: <span id="health">100</span>%</div>
-        </div>
+<canvas id="gameCanvas" width="450" height="600"></canvas>
 
-        <canvas id="gameCanvas"></canvas>
+<div id="controls">
+    <button id="startBtn">START</button>
+    <button id="backLoginBtn">BACK TO LOGIN TAB</button>
+    
+    <div style="width: 100%; height: 5px;"></div> 
 
-        <div id="countdown-overlay" class="overlay">
-            <div id="countdown-text">READY?</div>
-            <div id="countdown">3</div>
-        </div>
+    <button id="pauseBtn">PAUSE</button>
+    <button id="leftBtn">◀</button>
+    <button id="rightBtn">▶</button>
+    <button id="restartBtn">RESET</button>
+    <button id="checkpointBtn" style="background: #27ae60;">LEVELS</button>
+</div>
 
-        <div id="pause-overlay" class="overlay hidden">
-            <h1>PAUSED</h1>
-            <button onclick="resumeGame()">RESUME</button>
-            <button onclick="resetGame()">RESTART</button>
-        </div>
-    </div>
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
 
-    <script>
-        // Masukkan logika JavaScript kamu di sini:
-        // 1. Inisialisasi canvas
-        // 2. Loop permainan dengan speed = 5
-        // 3. Fungsi startAutoFire() yang jalan setelah countdown 0
-        // 4. Fungsi stopAutoFire() saat reset/pause
-    </script>
+    let currentUser = sessionStorage.getItem("activeUser") || "Guest";
+    let db = JSON.parse(localStorage.getItem("cubicShooterDB")) || {};
+    let maxLevelReached = db[currentUser] ? db[currentUser].progress : 1;
+
+    let isMainMenu = true;
+    let stars = [];
+    // 1. SPEED DIGANTI KE 5
+    let player = { x: 205, y: 520, width: 40, height: 40, speed: 5 }; 
+    let bullets = [];
+    let enemies = [];
+    let keys = {};
+    let score = 0;
+    let level = 1;
+    let isPaused = false;
+    let isGameOver = false;
+    let isCountdown = false;
+    let countdownTimer = 3;
+    let autoFireInterval = null; // Handler untuk tembak otomatis
+
+    // Bintang background
+    for (let i = 0; i < 80; i++) {
+        stars.push({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, size: Math.random()*1.5, opacity: Math.random(), fade: Math.random()*0.02+0.01 });
+    }
+
+    // Input Handlers
+    window.addEventListener("keydown", (e) => { keys[e.key] = true; });
+    window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+
+    const setupBtn = (id, key) => {
+        const el = document.getElementById(id);
+        el.addEventListener("touchstart", (e) => { e.preventDefault(); keys[key] = true; });
+        el.addEventListener("touchend", () => { keys[key] = false; });
+        el.addEventListener("mousedown", () => { keys[key] = true; });
+        el.addEventListener("mouseup", () => { keys[key] = false; });
+    };
+    setupBtn("leftBtn", "ArrowLeft");
+    setupBtn("rightBtn", "ArrowRight");
+
+    // Start Game
+    document.getElementById("startBtn").onclick = () => {
+        isMainMenu = false;
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("backLoginBtn").style.display = "none";
+        startCountdown();
+    };
+
+    document.getElementById("backLoginBtn").onclick = () => {
+        if(confirm("Kembali ke Login?")) window.location.reload();
+    };
+
+    document.getElementById("pauseBtn").onclick = togglePause;
+    document.getElementById("restartBtn").onclick = () => location.reload();
+
+    document.getElementById("checkpointBtn").onclick = () => {
+        let choice = prompt(`Level Tertinggi: ${maxLevelReached}\nPilih level (1-${maxLevelReached}):`, maxLevelReached);
+        if (choice >= 1 && choice <= maxLevelReached) {
+            level = parseInt(choice);
+            score = (level - 1) * 250;
+            isMainMenu = false;
+            document.getElementById("startBtn").style.display = "none";
+            document.getElementById("backLoginBtn").style.display = "none";
+            resetState();
+            startCountdown();
+        }
+    };
+
+    // --- LOGIKA TEMBAK OTOMATIS ---
+    function startAutoFire() {
+        if (autoFireInterval) clearInterval(autoFireInterval);
+        autoFireInterval = setInterval(() => {
+            if (!isPaused && !isGameOver && !isCountdown && !isMainMenu) {
+                bullets.push({ x: player.x + player.width/2 - 2, y: player.y, width: 4, height: 15 });
+            }
+        }, 350); // Kecepatan tembak otomatis (ms)
+    }
+
+    function stopAutoFire() {
+        clearInterval(autoFireInterval);
+        autoFireInterval = null;
+    }
+
+    function togglePause() {
+        if(!isMainMenu && !isGameOver) {
+            isPaused = !isPaused;
+            document.getElementById("pauseBtn").innerText = isPaused ? "RESUME" : "PAUSE";
+            // Berhenti menembak saat pause
+            if (isPaused) stopAutoFire(); else startAutoFire();
+        }
+    }
+
+    function startCountdown() {
+        isCountdown = true;
+        countdownTimer = 3;
+        stopAutoFire(); // Pastikan tidak menembak saat countdown
+        let timer = setInterval(() => {
+            countdownTimer--;
+            if (countdownTimer <= 0) {
+                clearInterval(timer);
+                isCountdown = false;
+                startAutoFire(); // 4. MULAI TEMBAK OTOMATIS SETELAH COUNTDOWN
+            }
+        }, 1000);
+    }
+
+    function resetState() {
+        enemies = [];
+        bullets = [];
+        isGameOver = false;
+        stopAutoFire();
+    }
+
+    function checkLevelUp() {
+        if (score >= level * 250 && level < 10) {
+            level++;
+            if (level > maxLevelReached) { maxLevelReached = level; }
+            resetState();
+            startCountdown();
+        }
+    }
+
+    function draw() {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        stars.forEach(s => {
+            ctx.fillStyle = `rgba(255,255,255,${s.opacity})`;
+            ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
+            s.opacity += s.fade;
+            if (s.opacity > 1 || s.opacity < 0) s.fade *= -1;
+        });
+
+        if (isMainMenu) {
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#00f3ff"; ctx.font = "bold 40px Arial";
+            ctx.fillText("CUBIC SHOOTER", canvas.width/2, 200);
+            ctx.fillStyle = "white"; ctx.font = "14px Arial";
+            ctx.fillText("Auto-Fire System Active", canvas.width/2, 240);
+        } else {
+            if (!isPaused && !isGameOver && !isCountdown) {
+                if (keys["ArrowLeft"] && player.x > 0) player.x -= player.speed;
+                if (keys["ArrowRight"] && player.x < canvas.width - player.width) player.x += player.speed;
+
+                bullets.forEach((b, i) => {
+                    b.y -= 8;
+                    ctx.fillStyle = "yellow"; ctx.fillRect(b.x, b.y, b.width, b.height);
+                    if (b.y < 0) bullets.splice(i, 1);
+                });
+
+                // 2. SPAWN MUSUH DIKURANGI (Probabilitas lebih kecil)
+                if (Math.random() < 0.007 + (level * 0.003)) { 
+                    enemies.push({ x: Math.random()*(canvas.width-30), y: -30, speed: 1.5+(level*0.4) });
+                }
+
+                enemies.forEach((en, ei) => {
+                    en.y += en.speed;
+                    ctx.fillStyle = "#ff4d4d"; ctx.fillRect(en.x, en.y, 30, 30);
+                    if (en.y > canvas.height) { isGameOver = true; stopAutoFire(); }
+                    bullets.forEach((b, bi) => {
+                        if (b.x < en.x + 30 && b.x + 4 > en.x && b.y < en.y + 30 && b.y + 15 > en.y) {
+                            enemies.splice(ei, 1); bullets.splice(bi, 1);
+                            score += 10; checkLevelUp();
+                        }
+                    });
+                });
+            }
+
+            ctx.fillStyle = "#00f3ff";
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            ctx.fillStyle = "white"; ctx.font = "bold 18px Arial"; ctx.textAlign = "left";
+            ctx.fillText("Score: " + score, 20, 40);
+            ctx.font = "12px Arial"; ctx.fillText("Level: " + level, 20, 60);
+
+            if (isCountdown) {
+                ctx.fillStyle = "yellow"; ctx.font = "bold 70px Arial"; ctx.textAlign = "center";
+                ctx.fillText(countdownTimer, canvas.width/2, canvas.height/2);
+            }
+
+            if (isGameOver) {
+                ctx.fillStyle = "red"; ctx.font = "bold 40px Arial"; ctx.textAlign = "center";
+                ctx.fillText("GAME OVER", canvas.width/2, canvas.height/2);
+            }
+        }
+        requestAnimationFrame(draw);
+    }
+    draw();
+</script>
 </body>
 </html>
